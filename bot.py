@@ -1,16 +1,12 @@
-import logging,sqlite3,time as ttime,os
+import logging,sqlite3,os,time as tt
 from datetime import datetime,timedelta
-from telegram import Update,InlineKeyboardButton as IKB,InlineKeyboardMarkup as IKM,ReplyKeyboardMarkup as RKM,BotCommand
+from telegram import Update,InlineKeyboardButton as B,InlineKeyboardMarkup as M,ReplyKeyboardMarkup as R,BotCommand
 from telegram.ext import Application,CommandHandler,CallbackQueryHandler,MessageHandler,filters
-try:
- import matplotlib;matplotlib.use("Agg");import matplotlib.pyplot as plt;HAS_PLT=True
-except:HAS_PLT=False
 BOT_TOKEN=os.environ.get("BOT_TOKEN","")
-MENU=RKM([["📋 Сегодня","📊 Статистика"],["🔔 Напоминание","📆 Календарь"],["➕ Добавить","🗑 Удалить"],["🏆 Достижения","⚙️ Настройки"],["❓ Помощь"]],resize_keyboard=True)
+MN=R([["📋 Сегодня","📊 Статистика"],["🔔 Напоминание","📆 Календарь"],["➕ Добавить","🗑 Удалить"],["🏆 Достижения","⚙️ Настройки"],["❓ Помощь"]],resize_keyboard=True)
 DH=["💧 Пить воду","🏃 Зарядка","📖 Чтение","🧘 Медитация","😴 Сон до 23:00","🥗 Здоровое питание","📵 Без телефона 1ч","✍️ Дневник","🚶 Прогулка","💊 Витамины"]
 DR=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
 logging.basicConfig(level=logging.INFO)
-TM={}
 def init_db():
  c=sqlite3.connect("h.db");e=c.cursor()
  e.execute("CREATE TABLE IF NOT EXISTS u(uid INTEGER PRIMARY KEY,un TEXT,rh INTEGER DEFAULT -1,rm INTEGER DEFAULT 0)")
@@ -19,8 +15,8 @@ def init_db():
  try:e.execute("ALTER TABLE h ADD COLUMN days TEXT DEFAULT '0123456'")
  except:pass
  c.commit();c.close()
-def q(sql,p=(),f=False,f1=False):
- c=sqlite3.connect("h.db");e=c.cursor();e.execute(sql,p)
+def q(s,p=(),f=False,f1=False):
+ c=sqlite3.connect("h.db");e=c.cursor();e.execute(s,p)
  if f1:r=e.fetchone()
  elif f:r=e.fetchall()
  else:r=e.lastrowid
@@ -68,27 +64,20 @@ def gmt(u,hid):
  r=q("SELECT SUM(mins) FROM c WHERE uid=? AND hid=? AND date BETWEEN ? AND ?",(u,hid,s,e),f1=True)
  return r[0] if r and r[0] else 0
 def fm(m):
- if m<60:return str(m)+"м"
+ if m<60:return str(m)+" мин"
  h=m//60;mm=m%60
- return str(h)+"ч" if mm==0 else str(h)+"ч"+str(mm)+"м"
+ return str(h)+" ч" if mm==0 else str(h)+" ч "+str(mm)+" мин"
 def dtx(ds):
  if not ds or ds=="0123456" or len(ds)>=7:return "ежедневно"
  return ",".join(DR[int(d)] for d in sorted(ds) if d.isdigit() and int(d)<7)
 def bpk(u):
  ex=[x[1] for x in gh(u)];kb=[]
  for i,h in enumerate(DH):
-  if h in ex:kb.append([IKB("✅ "+h,callback_data="up_"+str(i))])
-  else:kb.append([IKB("⬜ "+h,callback_data="pk_"+str(i))])
- kb.append([IKB("✅ Готово",callback_data="dp")]);return kb
-def bdk(hid,cur="0123456"):
- kb=[];row=[]
- for i,nm in enumerate(DR):
-  row.append(IKB(("✅" if str(i) in cur else "⬜")+nm,callback_data="sd_"+str(hid)+"_"+str(i)))
-  if len(row)==4:kb.append(row);row=[]
- if row:kb.append(row)
- kb.append([IKB("Каждый день",callback_data="sd_"+str(hid)+"_all")]);kb.append([IKB("✅Готово",callback_data="sd_"+str(hid)+"_done")]);return kb
+  if h in ex:kb.append([B("✅ "+h,callback_data="up_"+str(i))])
+  else:kb.append([B("⬜ "+h,callback_data="pk_"+str(i))])
+ kb.append([B("✅ Готово",callback_data="dp")]);return kb
 def cs(ctx):
- for k in["ct","rc","adding","mt"]:ctx.user_data.pop(k,None)
+ for k in["ct","rc","adding"]:ctx.user_data.pop(k,None)
 async def srem(context):
  now=datetime.now()
  for uid,rh,rm in q("SELECT uid,rh,rm FROM u WHERE rh>=0",(),f=True):
@@ -97,217 +86,162 @@ async def srem(context):
    if not habits:continue
    dn=sum(1 for _,_,cc,_ in habits if cc);tl=len(habits)
    if dn>=tl:continue
-   try:await context.bot.send_message(chat_id=uid,text="🔔 Осталось: "+str(tl-dn)+"/"+str(tl),reply_markup=MENU)
+   try:await context.bot.send_message(chat_id=uid,text="🔔 Осталось: "+str(tl-dn)+"/"+str(tl),reply_markup=MN)
    except:pass
 async def post_init(app):
  await app.bot.set_my_commands([BotCommand("start","Начать"),BotCommand("today","Сегодня"),BotCommand("stats","Статистика"),BotCommand("calendar","Календарь"),BotCommand("help","Помощь")])
  app.job_queue.run_repeating(srem,interval=60,first=10)
 async def cmd_start(up,ctx):
  u=up.effective_user.id;cs(ctx);q("INSERT OR IGNORE INTO u(uid,un)VALUES(?,?)",(u,up.effective_user.username or ""))
- await up.message.reply_text("👋 Выбери привычки:",reply_markup=IKM(bpk(u)))
+ await up.message.reply_text("👋 Привет! Выбери привычки:",reply_markup=M(bpk(u)))
 async def show_today(msg,u,edit=False):
  st=gt(u)
  if not st:
-  txt="📋 Нет привычек на сегодня! Добавь ➕"
+  tx="📋 Нет привычек на сегодня!\nНажми ➕ Добавить"
   if edit:
-   try:await msg.edit_text(txt)
+   try:await msg.edit_text(tx)
    except:pass
-  else:await msg.reply_text(txt,reply_markup=MENU)
+  else:await msg.reply_text(tx,reply_markup=MN)
   return
- t="📋 "+DR[datetime.now().weekday()]+" "+datetime.now().strftime("%d.%m")+":\n\n";kb=[];dn=0
- for hid,hn,comp,mins in st:
-  tk=str(u)+"_"+str(hid);tr=tk in TM
-  if comp:
-   s=stk(u,hid);line="✅ "+hn
-   if s>1:line+=" 🔥"+str(s)
-   if tr:line+=" ⏱"+fm(int((ttime.time()-TM[tk])/60))
-   elif mins>0:line+=" ("+fm(mins)+")"
-   dn+=1
-  else:line="⬜ "+hn
-  t+=line+"\n";row=[IKB("✅" if comp else "⬜",callback_data="t_"+str(hid))]
-  if comp:
-   if tr:row.append(IKB("🕐",callback_data="tc_"+str(hid)));row.append(IKB("⏹",callback_data="ts_"+str(hid)))
-   else:row.append(IKB("▶️",callback_data="go_"+str(hid)));row.append(IKB("✍️",callback_data="mn_"+str(hid)))
-  kb.append(row)
- tot=len(st);pct=round((dn/tot)*100) if tot else 0
- t+="\n"+"🟩"*(pct//10)+"⬜"*(10-pct//10)+" "+str(pct)+"% ("+str(dn)+"/"+str(tot)+")"
- if dn==tot and tot>0:t+="\n\n🎉 ИДЕАЛЬНЫЙ ДЕНЬ!"
- if edit:
-  try:await msg.edit_text(t,reply_markup=IKM(kb))
-  except:pass
- else:await msg.reply_text(t,reply_markup=IKM(kb))
-async def cmd_today(up,ctx):cs(ctx);await show_today(up.message,up.effective_user.id)
-async def show_cal(msg,u,wo=0,edit=False):
- today=datetime.now();mon=today-timedelta(days=today.weekday())+timedelta(weeks=wo);habits=ghf(u)
- t="📆 "+mon.strftime("%d.%m")+"—"+(mon+timedelta(days=6)).strftime("%d.%m")+":\n\n"
- for i in range(7):
-  day=mon+timedelta(days=i);w=str(day.weekday());ds=day.strftime("%Y-%m-%d")
-  it=" ←СЕГОДНЯ" if ds==today.strftime("%Y-%m-%d") else ""
-  dh=[x for x in habits if w in(x[2] or "0123456")]
-  dc=sum(1 for hid,_,_ in dh if q("SELECT id FROM c WHERE hid=? AND date=?",(hid,ds),f1=True));tl=len(dh)
-  if tl==0:s="выходной"
-  elif day.date()<=today.date():s="✅"+str(dc)+"/"+str(tl) if dc==tl else "⚠️"+str(dc)+"/"+str(tl) if dc>0 else "❌0/"+str(tl)
-  else:s="📌"+str(tl)
-  t+=DR[day.weekday()]+" "+day.strftime("%d.%m")+": "+s+it+"\n"
- kb=[[IKB("⬅️",callback_data="cl_"+str(wo-1)),IKB("Сегодня",callback_data="cl_0"),IKB("➡️",callback_data="cl_"+str(wo+1))]]
- if edit:
-  try:await msg.edit_text(t,reply_markup=IKM(kb))
-  except:pass
- else:await msg.reply_text(t,reply_markup=IKM(kb))
-async def cmd_cal(up,ctx):cs(ctx);await show_cal(up.message,up.effective_user.id)
-async def cmd_stats(up,ctx):
- cs(ctx);kb=[[IKB("7д",callback_data="s7"),IKB("30д",callback_data="s30")],[IKB("⏱Время",callback_data="st")],[IKB("📊График",callback_data="ch")]]
- await up.message.reply_text("📊 Статистика:",reply_markup=IKM(kb))
-async def cmd_rem(up,ctx):
- cs(ctx);u=up.effective_user.id;r=q("SELECT rh FROM u WHERE uid=?",(u,),f1=True);cur=r[0] if r and r[0]>=0 else None
- kb=[];row=[]
- for h in range(6,24):
-  row.append(IKB(("✅" if cur==h else "")+str(h)+":00",callback_data="rm_"+str(h)))
-  if len(row)==4:kb.append(row);row=[]
- if row:kb.append(row)
- kb.append([IKB("✍️Точное",callback_data="rc")]);kb.append([IKB("🔕Выкл",callback_data="ro")])
- await up.message.reply_text("🔔 "+(str(cur)+":00" if cur else "Выкл"),reply_markup=IKM(kb))
-async def cmd_set(up,ctx):
- cs(ctx);kb=[[IKB("🔄Привычки",callback_data="rs")],[IKB("📅Расписание",callback_data="sc")],[IKB("💣Сброс",callback_data="ra")]]
- await up.message.reply_text("⚙️",reply_markup=IKM(kb))
+ t="📋⚙️ Настройки:",reply_markup=M(kb))
 async def cmd_ach(up,ctx):
  cs(ctx);u=up.effective_user.id;ms=mxs(u);tc=ttl(u);pf=prf(u)
- t="🏆 Достижения:\n\n";achs=[("🌱","Росток","streak",3),("⚡","Разгон","streak",7),("🔥","В огне","streak",14),("⭐","Звезда","streak",21),("💎","Бриллиант","streak",30),("1️⃣","Первый шаг","total",1),("🔟","Десятка","total",10),("💯","Сотня","total",100),("💪","Идеальный день","perfect",1)];cnt=0
+ t="🏆 Достижения:\n\n";achs=[("🌱","Росток","s",3),("⚡","Разгон","s",7),("🔥","В огне","s",14),("⭐","Звезда","s",21),("💎","Бриллиант","s",30),("1️⃣","Первый шаг","t",1),("🔟","Десятка","t",10),("💯","Сотня","t",100),("💪","Идеальный день","p",1)];cnt=0
  for i,n,tp,v in achs:
-  val=ms if tp=="streak" else tc if tp=="total" else pf
-  if val>=v:t+="✅"+i+n+"\n";cnt+=1
-  else:t+="🔒"+i+n+"("+str(v-val)+")\n"
- t+="\n"+str(cnt)+"/"+str(len(achs));await up.message.reply_text(t,reply_markup=MENU)
-async def cmd_help(up,ctx):cs(ctx);await up.message.reply_text("📋Сегодня ✅отметить ▶️таймер 🕐время ⏹стоп ✍️вручную\n📆Календарь 📊Статистика 🏆Достижения\n🔔Напоминание ➕Добавить 🗑Удалить ⚙️Расписание",reply_markup=MENU)
+  val=ms if tp=="s" else tc if tp=="t" else pf
+  if val>=v:t+="✅ "+i+" "+n+"\n";cnt+=1
+  else:t+="🔒 "+i+" "+n+" (ещё "+str(v-val)+")\n"
+ t+="\n"+str(cnt)+"/"+str(len(achs));await up.message.reply_text(t,reply_markup=MN)
+async def cmd_help(up,ctx):
+ cs(ctx);await up.message.reply_text("📋 Сегодня — список привычек\n✅ — отметить выполнение\n⏱ Записать время — сколько делал\n📆 Календарь — неделя\n📊 Статистика — прогресс\n🔔 Напоминание — настроить\n➕ Добавить / 🗑 Удалить\n🏆 Достижения — награды",reply_markup=MN)
 async def handle_cb(up,ctx):
  cq=up.callback_query;await cq.answer();u=cq.from_user.id;d=cq.data
  if d.startswith("pk_"):
   i=int(d[3:])
   if i<len(DH):q("INSERT INTO h(uid,name,days)VALUES(?,?,?)",(u,DH[i],"0123456"))
-  try:await cq.message.edit_reply_markup(reply_markup=IKM(bpk(u)))
+  try:await cq.message.edit_reply_markup(reply_markup=M(bpk(u)))
   except:pass
  elif d.startswith("up_"):
   i=int(d[3:])
   if i<len(DH):
    for hid,hn in gh(u):
     if hn==DH[i]:q("UPDATE h SET act=0 WHERE id=?",(hid,));break
-  try:await cq.message.edit_reply_markup(reply_markup=IKM(bpk(u)))
+  try:await cq.message.edit_reply_markup(reply_markup=M(bpk(u)))
   except:pass
  elif d=="dp":
-  try:await cq.message.edit_text("✅ Выбрано: "+str(len(gh(u))))
+  try:await cq.message.edit_text("✅ Выбрано: "+str(len(gh(u)))+" привычек!")
   except:pass
-  await cq.message.reply_text("🎉",reply_markup=MENU)
+  await cq.message.reply_text("🎉 Готово! Жми 📋 Сегодня",reply_markup=MN)
  elif d.startswith("t_"):tog(u,int(d[2:]));await show_today(cq.message,u,edit=True)
- elif d.startswith("go_"):
-  hid=int(d[3:]);TM[str(u)+"_"+str(hid)]=ttime.time()
-  hn=q("SELECT name FROM h WHERE id=?",(hid,),f1=True)
-  await cq.message.reply_text("⏱ ТАЙМЕР: "+(hn[0] if hn else "?")+"\n🕐 "+datetime.now().strftime("%H:%M:%S")+"\n\n🕐=проверить ⏹=стоп",reply_markup=MENU)
- elif d.startswith("tc_"):
-  hid=int(d[3:]);tk=str(u)+"_"+str(hid)
-  if tk in TM:
-   el=ttime.time()-TM[tk];await cq.answer(text="⏱ "+str(int(el/60))+"м "+str(int(el%60))+"с",show_alert=True)
-  else:await cq.answer(text="Не запущен",show_alert=True)
- elif d.startswith("ts_"):
-  hid=int(d[3:]);tk=str(u)+"_"+str(hid)
-  if tk in TM:
-   mins=max(int((ttime.time()-TM[tk])/60),1);del TM[tk];stm(u,hid,mins)
-   hn=q("SELECT name FROM h WHERE id=?",(hid,),f1=True)
-   await cq.message.reply_text("⏹ "+(hn[0] if hn else "?")+"\n⏱ "+fm(mins)+"\n📅Месяц: "+fm(gmt(u,hid)),reply_markup=MENU)
-  await show_today(cq.message,u,edit=False)
  elif d.startswith("mn_"):
-  hid=int(d[3:]);ctx.user_data["mt"]=hid;hn=q("SELECT name FROM h WHERE id=?",(hid,),f1=True)
-  kb=[[IKB("15м",callback_data="sm("+dtx(days)+")",callback_data="sh_"+str(hid))] for hid,hn,days in hb];kb.append([IKB("⬅️",callback_data="bs")])
-  try:await cq.message.edit_text("📅 Расписание:",reply_markup=IKM(kb))
+  hid=int(d[3:]);hn=q("SELECT name FROM h WHERE id=?",(hid,),f1=True)
+  cur=gmt(u,hid);tx="⏱ "+(hn[0] if hn else "?")+"\n📅 За месяц: "+fm(cur)+"\n\nВыбери время:"
+  kb=[[B("15 мин",callback_data="sm_"+str(hid)+"_15"),B("30 мин",callback_data="sm_"+str(hid)+"_30"),B("45 мин",callback_data="sm_"+str(hid)+"_45")],[B("1 ч",callback_data="sm_"+str(hid)+"_60"),B("1.5 ч",callback_data="sm_"+str(hid)+"_90"),B("2 ч",callback_data="sm_"+str(hid)+"_120")],[B("3 ч",callback_data="sm_"+str(hid)+"_180"),B("4 ч",callback_data="sm_"+str(hid)+"_240"),B("5 ч",callback_data="sm_"+str(hid)+"_300")],[B("✍️ Ввести своё",callback_data="ct_"+str(hid))],[B("⬅️ Назад",callback_data="bk")]]
+  try:await cq.message.edit_text(tx,reply_markup=M(kb))
   except:pass
- elif d.startswith("sh_"):
-  hid=int(d[3:]);r=q("SELECT name,days FROM h WHERE id=?",(hid,),f1=True)
-  if r:
-   try:await cq.message.edit_text("📅 "+r[0],reply_markup=IKM(bdk(hid,r[1] or "0123456")))
+ elif d.startswith("sm_"):
+  p=d[3:].split("_");hid=int(p[0]);mins=int(p[1]);stm(u,hid,mins)
+  hn=q("SELECT name FROM h WHERE id=?",(hid,),f1=True)
+  try:await cq.message.edit_text("✅ "+(hn[0] if hn else "?")+": "+fm(mins)+"\n📅 За месяц: "+fm(gmt(u,hid)))
+  except:pass
+  await show_today(cq.message,u,edit=False)
+ elif d.startswith("ct_"):
+  ctx.user_data["ct"]=int(d[3:])
+  try:await cq.message.edit_text("✍️ Напиши время:\n90 = 90 минут\n1:30 = 1 час 30 мин")
+  except:pass
+ elif d=="bk":cs(ctx);await show_today(cq.message,u,edit=True)
+ elif d.startswith("cl_"):await show_cal(cq.message,u,int(d[3:]),edit=True)
+ elif d=="s7" or d=="s30":
+  days=7 if d=="s7" else 30;hb=gh(u)
+  if not hb:
+   try:await cq.message.edit_text("Нет привычек!")
    except:pass
- elif d.startswith("sd_"):
-  p=d[3:].split("_");hid=int(p[0]);act=p[1]
-  if act=="done":
-   r=q("SELECT name,days FROM h WHERE id=?",(hid,),f1=True)
-   try:await cq.message.edit_text("✅ "+r[0]+" — "+dtx(r[1]))
+   return
+  tp=0;td=0;end=datetime.now();start=end-timedelta(days=days-1)
+  for i in range(days):
+   day=start+timedelta(days=i);ds=day.strftime("%Y-%m-%d");w=str(day.weekday())
+   cn=q("SELECT COUNT(*) FROM h WHERE uid=? AND act=1 AND days LIKE '%'||?||'%'",(u,w),f1=True);tp+=cn[0] if cn else 0
+   r=q("SELECT COUNT(*) FROM c WHERE uid=? AND date=?",(u,ds),f1=True);td+=r[0] if r else 0
+  pct=round((td/tp)*100) if tp else 0;tx="📊 "+str(days)+" дней:\n"+"🟩"*(pct//10)+"⬜"*(10-pct//10)+" "+str(pct)+"%\n"
+  for hid,hn in hb:tx+="\n"+hn+" 🔥"+str(stk(u,hid))
+  try:await cq.message.edit_text(tx)
+  except:pass
+ elif d=="st":
+  hb=gh(u)
+  if not hb:
+   try:await cq.message.edit_text("Нет привычек!")
    except:pass
-   await cq.message.reply_text("📱",reply_markup=MENU)
-  elif act=="all":
-   q("UPDATE h SET days=? WHERE id=?",("0123456",hid));nm=q("SELECT name FROM h WHERE id=?",(hid,),f1=True)
-   try:await cq.message.edit_text("📅 "+nm[0],reply_markup=IKM(bdk(hid,"0123456")))
-   except:pass
-  else:
-   r=q("SELECT days FROM h WHERE id=?",(hid,),f1=True);days=r[0] if r and r[0] else "0123456"
-   days=days.replace(act,"") if act in days else days+act
-   if not days:days="0123456"
-   days="".join(sorted(days));q("UPDATE h SET days=? WHERE id=?",(days,hid));nm=q("SELECT name FROM h WHERE id=?",(hid,),f1=True)
-   try:await cq.message.edit_text("📅 "+nm[0],reply_markup=IKM(bdk(hid,days)))
-   except:pass
+   return
+  tx="⏱ Время за месяц:\n\n";ta=0
+  for hid,hn in hb:
+   m=gmt(u,hid);ta+=m
+   if m>0:tx+=hn+": "+fm(m)+"\n"
+  tx+="\n📊 Всего: "+fm(ta)
+  try:await cq.message.edit_text(tx)
+  except:pass
+ elif d=="ro":q("UPDATE u SET rh=-1 WHERE uid=?",(u,));await cq.message.edit_text("🔕 Выключено!")
+ elif d=="rc":
+  ctx.user_data["rc"]=True
+  try:await cq.message.edit_text("✍️ Напиши время (например 20:30)")
+  except:pass
+ elif d.startswith("rm_"):
+  h=int(d[3:]);q("UPDATE u SET rh=?,rm=0 WHERE uid=?",(h,u))
+  try:await cq.message.edit_text("🔔 "+str(h)+":00 ✅")
+  except:pass
  elif d=="rs":
-  try:await cq.message.edit_text("📋",reply_markup=IKM(bpk(u)))
-  except:pass
- elif d=="bs":
-  kb=[[IKB("🔄Привычки",callback_data="rs")],[IKB("📅Расписание",callback_data="sc")],[IKB("💣Сброс",callback_data="ra")]]
-  try:await cq.message.edit_text("⚙️",reply_markup=IKM(kb))
+  try:await cq.message.edit_text("📋 Выбери привычки:",reply_markup=M(bpk(u)))
   except:pass
  elif d=="ra":
-  try:await cq.message.edit_text("💣 Удалить ВСЕ?",reply_markup=IKM([[IKB("✅Да",callback_data="ry"),IKB("❌Нет",callback_data="rn")]]))
+  try:await cq.message.edit_text("💣 Точно удалить ВСЁ?",reply_markup=M([[B("✅ Да",callback_data="ry"),B("❌ Нет",callback_data="rn")]]))
   except:pass
  elif d=="ry":
   for t in["c","h","u"]:q("DELETE FROM "+t+" WHERE uid=?",(u,))
-  try:await cq.message.edit_text("🗑 /start")
+  try:await cq.message.edit_text("🗑 Удалено! Нажми /start")
   except:pass
  elif d=="rn":
-  try:await cq.message.edit_text("👍")
+  try:await cq.message.edit_text("👍 Отменено!")
   except:pass
-  await cq.message.reply_text("📱",reply_markup=MENU)
+  await cq.message.reply_text("📱",reply_markup=MN)
  elif d.startswith("dh_"):
   hid=int(d[3:]);r=q("SELECT name FROM h WHERE id=?",(hid,),f1=True);q("UPDATE h SET act=0 WHERE id=?",(hid,))
   try:await cq.message.edit_text("✅ "+(r[0] if r else "?")+" удалена!")
   except:pass
-  await cq.message.reply_text("📱",reply_markup=MENU)
+  await cq.message.reply_text("📱",reply_markup=MN)
 async def handle_txt(up,ctx):
  u=up.effective_user.id;t=up.message.text
  if ctx.user_data.get("ct"):
   try:
-   txt=t.replace(" ","").replace("ч",":").replace("м","")
-   m=int(txt.split(":")[0])*60+int(txt.split(":")[1]) if ":" in txt else int(txt)
+   tx=t.replace(" ","").replace("ч",":").replace("м","")
+   m=int(tx.split(":")[0])*60+int(tx.split(":")[1]) if ":" in tx else int(tx)
    hid=ctx.user_data["ct"];stm(u,hid,m);cs(ctx)
-   await up.message.reply_text("✅ "+fm(m)+"\n📅"+fm(gmt(u,hid)),reply_markup=MENU)
-  except:await up.message.reply_text("❌ Число! 90 или 1:30")
-  return
- if ctx.user_data.get("mt"):
-  try:
-   txt=t.replace(" ","").replace("ч",":").replace("м","")
-   m=int(txt.split(":")[0])*60+int(txt.split(":")[1]) if ":" in txt else int(txt)
-   hid=ctx.user_data["mt"];stm(u,hid,m);cs(ctx)
-   await up.message.reply_text("✅ "+fm(m)+"\n📅"+fm(gmt(u,hid)),reply_markup=MENU)
-  except:await up.message.reply_text("❌ Число! 90 или 1:30")
+   await up.message.reply_text("✅ "+fm(m)+"\n📅 За месяц: "+fm(gmt(u,hid)),reply_markup=MN)
+  except:await up.message.reply_text("❌ Напиши число! 90 или 1:30")
   return
  if ctx.user_data.get("rc"):
   try:
    p=t.replace(".",":").split(":");h=int(p[0]);m=int(p[1]) if len(p)>1 else 0
-   if 0<=h<=23 and 0<=m<=59:q("UPDATE u SET rh=?,rm=? WHERE uid=?",(h,m,u));cs(ctx);await up.message.reply_text("🔔 "+str(h)+":"+str(m).zfill(2)+" ✅",reply_markup=MENU)
-   else:await up.message.reply_text("❌ 0:00-23:59")
-  except:await up.message.reply_text("❌ 20:30")
+   if 0<=h<=23 and 0<=m<=59:q("UPDATE u SET rh=?,rm=? WHERE uid=?",(h,m,u));cs(ctx);await up.message.reply_text("🔔 "+str(h)+":"+str(m).zfill(2)+" ✅",reply_markup=MN)
+   else:await up.message.reply_text("❌ От 0:00 до 23:59")
+  except:await up.message.reply_text("❌ Напиши 20:30")
   return
  if ctx.user_data.get("adding"):
   q("INSERT INTO h(uid,name,days)VALUES(?,?,?)",(u,t,"0123456"));cs(ctx)
-  await up.message.reply_text("✅ "+t+" добавлена!",reply_markup=MENU);return
+  await up.message.reply_text("✅ "+t+" добавлена!",reply_markup=MN);return
  if "Сегодня" in t:cs(ctx);await show_today(up.message,u)
  elif "Статистика" in t:await cmd_stats(up,ctx)
  elif "Напоминание" in t:await cmd_rem(up,ctx)
  elif "Календарь" in t:await show_cal(up.message,u)
  elif "Настройки" in t:await cmd_set(up,ctx)
- elif "Добавить" in t:cs(ctx);ctx.user_data["adding"]=True;await up.message.reply_text("✍️ Название:")
+ elif "Добавить" in t:cs(ctx);ctx.user_data["adding"]=True;await up.message.reply_text("✍️ Напиши название привычки:")
  elif "Удалить" in t:
   hb=gh(u)
-  if not hb:await up.message.reply_text("Нет!",reply_markup=MENU);return
-  await up.message.reply_text("🗑",reply_markup=IKM([[IKB("🗑"+hn,callback_data="dh_"+str(hid))] for hid,hn in hb]))
+  if not hb:await up.message.reply_text("Нет привычек!",reply_markup=MN);return
+  await up.message.reply_text("🗑 Какую удалить?",reply_markup=M([[B("🗑 "+hn,callback_data="dh_"+str(hid))] for hid,hn in hb]))
  elif "Достижения" in t:await cmd_ach(up,ctx)
  elif "Помощь" in t:await cmd_help(up,ctx)
- else:await up.message.reply_text("Меню👇",reply_markup=MENU)
+ else:await up.message.reply_text("Выбери из меню 👇",reply_markup=MN)
 def main():
- init_db();print("🚀 Запущен!")
+ init_db();print("🚀 Бот запущен!")
  app=Application.builder().token(BOT_TOKEN).post_init(post_init).build()
  for c,f in[("start",cmd_start),("today",cmd_today),("stats",cmd_stats),("reminder",cmd_rem),("settings",cmd_set),("achievements",cmd_ach),("calendar",cmd_cal),("help",cmd_help)]:app.add_handler(CommandHandler(c,f))
  app.add_handler(CallbackQueryHandler(handle_cb));app.add_handler(MessageHandler(filters.TEXT&~filters.COMMAND,handle_txt))
