@@ -103,7 +103,7 @@ async def show_today(msg,u,edit=False):
    except:pass
   else:await msg.reply_text(tx,reply_markup=MN)
   return
- t="📋⚙️ Настройки:",reply_markup=M(kb))
+  await up.message.reply_text("⚙️ Настройки:",reply_markup=M(kb))
 async def cmd_ach(up,ctx):
  cs(ctx);u=up.effective_user.id;ms=mxs(u);tc=ttl(u);pf=prf(u)
  t="🏆 Достижения:\n\n";achs=[("🌱","Росток","s",3),("⚡","Разгон","s",7),("🔥","В огне","s",14),("⭐","Звезда","s",21),("💎","Бриллиант","s",30),("1️⃣","Первый шаг","t",1),("🔟","Десятка","t",10),("💯","Сотня","t",100),("💪","Идеальный день","p",1)];cnt=0
