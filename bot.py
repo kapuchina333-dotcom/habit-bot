@@ -1,11 +1,11 @@
-import logging,sqlite3,time as ttime
+import logging,sqlite3,time as ttime,os
 from datetime import datetime,timedelta
 from telegram import Update,InlineKeyboardButton,InlineKeyboardMarkup,ReplyKeyboardMarkup,BotCommand
 from telegram.ext import Application,CommandHandler,CallbackQueryHandler,MessageHandler,filters
 try:
     import matplotlib;matplotlib.use("Agg");import matplotlib.pyplot as plt;HAS_PLT=True
 except:HAS_PLT=False
-BOT_TOKEN="8717114083:AAEgNViVX7h0ea6pHc4Awp76h0gF0eJbcQg"
+BOT_TOKEN=os.environ.get("BOT_TOKEN","8717114083:AAEgNViVX7h0ea6pHc4Awp76h0gF0eJbcQg")
 MENU_KB=ReplyKeyboardMarkup([["📋 Сегодня","📊 Статистика"],["🔔 Напоминание","⚙️ Настройки"],["➕ Добавить","🗑 Удалить"],["🏆 Достижения","❓ Помощь"]],resize_keyboard=True)
 DEFAULT_HABITS=["💧 Пить воду","🏃 Зарядка","📖 Чтение","🧘 Медитация","😴 Сон до 23:00","🥗 Здоровое питание","📵 Без телефона 1ч","✍️ Дневник","🚶 Прогулка","💊 Витамины"]
 logging.basicConfig(level=logging.INFO)
@@ -197,7 +197,7 @@ async def handle_cb(update,context):
         except:pass
     elif d=="done_pick":
         h=get_habits(u)
-        try:await q.message.edit_message_text("✅ Выбрано: "+str(len(h))+" привычек!\n\nНажми 📋 Сегодня чтобы начать!")
+        try:await q.message.edit_text("✅ Выбрано: "+str(len(h))+" привычек!\n\nНажми 📋 Сегодня чтобы начать!")
         except:pass
         await q.message.reply_text("🎉 Готово! Используй меню внизу:",reply_markup=MENU_KB)
     elif d.startswith("t_"):
@@ -223,20 +223,20 @@ async def handle_cb(update,context):
         if row:kb.append(row)
         kb.append([InlineKeyboardButton("✍️ Своё",callback_data="ct_"+str(hid))])
         kb.append([InlineKeyboardButton("⬅️",callback_data="back")])
-        try:await q.message.edit_message_text("⏱ Сколько?",reply_markup=InlineKeyboardMarkup(kb))
+        try:await q.message.edit_text("⏱ Сколько?",reply_markup=InlineKeyboardMarkup(kb))
         except:pass
     elif d.startswith("sm_"):
         parts=d[3:].split("_");hid=int(parts[0]);mins=int(parts[1])
         set_time(u,hid,mins);await show_today(q.message,u,edit=True)
     elif d.startswith("ct_"):
         context.user_data["ct"]=int(d[3:])
-        try:await q.message.edit_message_text("✍️ Напиши минуты числом:")
+        try:await q.message.edit_text("✍️ Напиши минуты числом:")
         except:pass
     elif d=="back":await show_today(q.message,u,edit=True)
     elif d.startswith("stats_"):
         days=int(d[6:]);hb=get_habits(u)
         if not hb:
-            try:await q.message.edit_message_text("Нет привычек!")
+            try:await q.message.edit_text("Нет привычек!")
             except:pass
             return
         end=datetime.now();start=end-timedelta(days=days-1)
@@ -245,10 +245,10 @@ async def handle_cb(update,context):
         bar="🟩"*(pct//10)+"⬜"*(10-pct//10)
         t="📊 "+str(days)+" дней:\n\n"+bar+" "+str(pct)+"%\n"+str(comp)+"/"+str(pos)+"\n"
         for hid,hn in hb:t+="\n"+hn+" 🔥"+str(get_streak(u,hid))
-        try:await q.message.edit_message_text(t)
+        try:await q.message.edit_text(t)
         except:pass
     elif d=="chart":
-        try:await q.message.edit_message_text("📊 Рисую...")
+        try:await q.message.edit_text("📊 Рисую...")
         except:pass
         p=await make_chart(u)
         if p:await q.message.reply_photo(photo=open(p,"rb"),reply_markup=MENU_KB)
@@ -256,35 +256,35 @@ async def handle_cb(update,context):
     elif d.startswith("rem_"):
         if d=="rem_off":
             db("UPDATE users SET reminder_hour=-1,reminder_min=0 WHERE user_id=?",(u,))
-            try:await q.message.edit_message_text("🔕 Напоминания выключены!")
+            try:await q.message.edit_text("🔕 Напоминания выключены!")
             except:pass
         elif d=="rem_custom":
             context.user_data["rem_custom"]=True
-            try:await q.message.edit_message_text("✍️ Напиши время напоминания в формате ЧЧ:ММ\n\nНапример: 20:30 или 7:15 или 21:45\n\nПросто напиши время сообщением:")
+            try:await q.message.edit_text("✍️ Напиши время напоминания в формате ЧЧ:ММ\n\nНапример: 20:30 или 7:15 или 21:45\n\nПросто напиши время сообщением:")
             except:pass
         else:
             h=int(d[4:]);db("UPDATE users SET reminder_hour=?,reminder_min=0 WHERE user_id=?",(h,u))
-            try:await q.message.edit_message_text("🔔 Напоминание установлено на "+str(h)+":00 ✅\n\nБот напомнит тебе каждый день!")
+            try:await q.message.edit_text("🔔 Напоминание установлено на "+str(h)+":00 ✅\n\nБот напомнит тебе каждый день!")
             except:pass
     elif d=="reselect":
-        try:await q.message.edit_message_text("📋 Выбери:",reply_markup=InlineKeyboardMarkup(build_pick_kb(u)))
+        try:await q.message.edit_text("📋 Выбери:",reply_markup=InlineKeyboardMarkup(build_pick_kb(u)))
         except:pass
     elif d=="reset_ask":
         kb=[[InlineKeyboardButton("✅ Да удалить",callback_data="reset_yes"),InlineKeyboardButton("❌ Нет",callback_data="reset_no")]]
-        try:await q.message.edit_message_text("💣 Удалить ВСЕ данные?",reply_markup=InlineKeyboardMarkup(kb))
+        try:await q.message.edit_text("💣 Удалить ВСЕ данные?",reply_markup=InlineKeyboardMarkup(kb))
         except:pass
     elif d=="reset_yes":
         for tbl in ["completions","habits","achievements","users"]:db("DELETE FROM "+tbl+" WHERE user_id=?",(u,))
-        try:await q.message.edit_message_text("🗑 Всё удалено! Нажми /start")
+        try:await q.message.edit_text("🗑 Всё удалено! Нажми /start")
         except:pass
     elif d=="reset_no":
-        try:await q.message.edit_message_text("👍 Отменено!")
+        try:await q.message.edit_text("👍 Отменено!")
         except:pass
         await q.message.reply_text("📱",reply_markup=MENU_KB)
     elif d.startswith("dh_"):
         hid=int(d[3:]);h=db("SELECT name FROM habits WHERE id=?",(hid,),f1=True);nm=h[0] if h else "?"
         db("UPDATE habits SET active=0 WHERE id=?",(hid,));db("DELETE FROM completions WHERE habit_id=?",(hid,))
-        try:await q.message.edit_message_text("✅ Привычка '"+nm+"' удалена!")
+        try:await q.message.edit_text("✅ Привычка '"+nm+"' удалена!")
         except:pass
         await q.message.reply_text("📱",reply_markup=MENU_KB)
 async def handle_txt(update,context):
