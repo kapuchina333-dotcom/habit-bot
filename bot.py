@@ -27,9 +27,8 @@ def setup():
 
 MN = ReplyKeyboardMarkup([
     ["📋 Сегодня", "📊 Стат"],
-    ["📆 Календарь", "🔔 Напомнить"],
-    ["➕ Добав", "🗑 Удал"],
-    ["❓ Помощь"]
+    ["📆 Календарь", "❓ Помощь"],
+    ["➕ Добав", "🗑 Удал"]
 ], resize_keyboard=True)
 
 async def start(up, ctx):
@@ -62,7 +61,14 @@ async def today(msg, u, ed=False):
         if ok:
             t += f"✅ {hn}"
             if mn > 0:
-                t += f" ({mn} мин)"
+                hrs = mn // 60
+                mins = mn % 60
+                if hrs > 0 and mins > 0:
+                    t += f" ({hrs}ч {mins}м)"
+                elif hrs > 0:
+                    t += f" ({hrs}ч)"
+                else:
+                    t += f" ({mins}м)"
             t += "\n"
             dn += 1
             kb.append([
@@ -128,28 +134,6 @@ async def calendar(msg, u, wo=0, ed=False):
     else:
         await msg.reply_text(t, reply_markup=mk)
 
-async def send_reminders(ctx):
-    now = datetime.now()
-    rows = r("SELECT id,rh,rm FROM u WHERE rh>=0", (), 2)
-    for uid, rh, rm in rows:
-        if now.hour == rh and now.minute == rm:
-            d = now.strftime("%Y-%m-%d")
-            total = r("SELECT COUNT(*) FROM h WHERE u=? AND a=1", (uid,), 1)
-            done = r("SELECT COUNT(*) FROM c WHERE u=? AND d=?", (uid, d), 1)
-            tl = total[0] if total else 0
-            dc = done[0] if done else 0
-            if tl == 0 or dc >= tl:
-                continue
-            try:
-                await ctx.bot.send_message(
-                    chat_id=uid,
-                    text=f"🔔 Осталось {tl-dc}/{tl} привычек!",
-                    reply_markup=MN)
-            except: pass
-
-async def post_init(app):
-    app.job_queue.run_repeating(send_reminders, interval=60, first=10)
-
 async def cb(up, ctx):
     q = up.callback_query
     await q.answer()
@@ -166,54 +150,64 @@ async def cb(up, ctx):
         await today(q.message, u, True)
     elif d.startswith("m_"):
         hid = int(d[2:])
-        h = str(hid)
-        kb = [
-            [InlineKeyboardButton("15м", callback_data=f"s_{h}_15"),
-             InlineKeyboardButton("30м", callback_data=f"s_{h}_30"),
-             InlineKeyboardButton("45м", callback_data=f"s_{h}_45")],
-            [InlineKeyboardButton("1ч", callback_data=f"s_{h}_60"),
-             InlineKeyboardButton("2ч", callback_data=f"s_{h}_120"),
-             InlineKeyboardButton("3ч", callback_data=f"s_{h}_180")],
-            [InlineKeyboardButton("⬅️", callback_data="back")]
-        ]
-        try: await q.message.edit_text("⏱ Выбери:", reply_markup=InlineKeyboardMarkup(kb))
+        ctx.user_data["time_hid"] = hid
+        try: await q.message.edit_text("⏱ Напиши время.\nПримеры: 30 или 1ч30м или 7ч")
         except: pass
-    elif d.startswith("s_"):
-        p = d[2:].split("_")
-        hid = int(p[0])
-        mn = int(p[1])
-        dd = datetime.now().strftime("%Y-%m-%d")
-        x = r("SELECT id FROM c WHERE h=? AND d=?", (hid, dd), 1)
-        if x:
-            r("UPDATE c SET m=? WHERE id=?", (mn, x[0]))
-        else:
-            r("INSERT INTO c(u,h,d,m) VALUES(?,?,?,?)", (u, hid, dd, mn))
-        try: await q.message.edit_text(f"✅ {mn} мин")
-        except: pass
-        await today(q.message, u, False)
     elif d == "back":
         await today(q.message, u, True)
     elif d.startswith("cal_"):
         wo = int(d[4:])
         await calendar(q.message, u, wo, True)
-    elif d.startswith("rem_"):
-        h = int(d[4:])
-        r("UPDATE u SET rh=?,rm=0 WHERE id=?", (h, u))
-        try: await q.message.edit_text(f"🔔 Напоминание: {h}:00 ✅")
-        except: pass
-    elif d == "remoff":
-        r("UPDATE u SET rh=-1 WHERE id=?", (u,))
-        try: await q.message.edit_text("🔕 Напоминание выключено!")
-        except: pass
     elif d.startswith("del_"):
         hid = int(d[4:])
         r("UPDATE h SET a=0 WHERE id=?", (hid,))
         try: await q.message.edit_text("✅ Удалено!")
         except: pass
 
+def parse_time(t):
+    t = t.strip().lower().replace(" ", "")
+    if t.isdigit():
+        return int(t)
+    total = 0
+    if "ч" in t:
+        parts = t.split("ч")
+        h = parts[0]
+        if h.isdigit():
+            total += int(h) * 60
+        rest = parts[1] if len(parts) > 1 else ""
+    else:
+        rest = t
+    rest = rest.replace("м", "").replace("m", "")
+    if rest.isdigit():
+        total += int(rest)
+    return total if total > 0 else None
+
 async def txt(up, ctx):
     u = up.effective_user.id
     t = up.message.text
+    if ctx.user_data.get("time_hid"):
+        hid = ctx.user_data.pop("time_hid")
+        mn = parse_time(t)
+        if mn is None:
+            await up.message.reply_text("❌ Не понял. Напиши число: 30 или 1ч30м")
+            ctx.user_data["time_hid"] = hid
+            return
+        dd = datetime.now().strftime("%Y-%m-%d")
+        x = r("SELECT id FROM c WHERE h=? AND d=?", (hid, dd), 1)
+        if x:
+            r("UPDATE c SET m=? WHERE id=?", (mn, x[0]))
+        else:
+            r("INSERT INTO c(u,h,d,m) VALUES(?,?,?,?)", (u, hid, dd, mn))
+        hrs = mn // 60
+        mins = mn % 60
+        if hrs > 0 and mins > 0:
+            ft = f"{hrs}ч {mins}м"
+        elif hrs > 0:
+            ft = f"{hrs}ч"
+        else:
+            ft = f"{mins}м"
+        await up.message.reply_text(f"✅ Записано: {ft}", reply_markup=MN)
+        return
     if ctx.user_data.get("add"):
         r("INSERT INTO h(u,n) VALUES(?,?)", (u, t))
         ctx.user_data.pop("add", None)
@@ -223,24 +217,6 @@ async def txt(up, ctx):
         await today(up.message, u)
     elif "Календарь" in t:
         await calendar(up.message, u)
-    elif "Напомнить" in t:
-        row = r("SELECT rh FROM u WHERE id=?", (u,), 1)
-        cur = row[0] if row and row[0] >= 0 else None
-        kb = []
-        line = []
-        for h in range(6, 24):
-            label = f"{'✅' if cur == h else ''}{h}:00"
-            line.append(InlineKeyboardButton(label, callback_data=f"rem_{h}"))
-            if len(line) == 4:
-                kb.append(line)
-                line = []
-        if line:
-            kb.append(line)
-        kb.append([InlineKeyboardButton("🔕 Выключить", callback_data="remoff")])
-        now_text = f"{cur}:00" if cur is not None else "выкл"
-        await up.message.reply_text(
-            f"🔔 Сейчас: {now_text}\nВыбери время:",
-            reply_markup=InlineKeyboardMarkup(kb))
     elif "Добав" in t:
         ctx.user_data["add"] = True
         await up.message.reply_text("✍️ Напиши название:")
@@ -264,14 +240,14 @@ async def txt(up, ctx):
         await up.message.reply_text(tx, reply_markup=MN)
     elif "Помощь" in t:
         await up.message.reply_text(
-            "📋=сегодня\n📆=календарь\n🔔=напоминание\n➕=добавить\n🗑=удалить\n⏱=время",
+            "📋=сегодня\n📆=календарь\n➕=добавить\n🗑=удалить\n⏱=время",
             reply_markup=MN)
     else:
         await up.message.reply_text("👇", reply_markup=MN)
 
 def main():
     setup()
-    app = Application.builder().token(T).post_init(post_init).build()
+    app = Application.builder().token(T).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(cb))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, txt))
