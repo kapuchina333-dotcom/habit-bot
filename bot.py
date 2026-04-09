@@ -13,14 +13,14 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 # ========== НАСТРОЙКИ ==========
 TOKEN = os.environ.get("BOT_TOKEN", "")
 if not TOKEN:
-    raise ValueError("BOT_TOKEN not set")
+    raise ValueError("BOT_TOKEN environment variable not set")
 DB_NAME = "habits.db"
-TIMEZONE = ZoneInfo("Europe/Moscow")  # измените под свой часовой пояс
+TIMEZONE = ZoneInfo("Europe/Moscow")
 
-# ========== ЯЗЫКИ (только русский и английский) ==========
+# ========== ЯЗЫКИ ==========
 TEXTS = {
     'ru': {
-        'welcome': "👋 Привет! Я трекер привычек с уровнями и опытом. Выбери язык /choose_language",
+        'welcome': "👋 Привет! Я трекер привычек. Выбери язык /choose_language",
         'today': "📋 Сегодня",
         'stats': "📊 Статистика",
         'add': "➕ Добавить привычку",
@@ -32,14 +32,12 @@ TEXTS = {
         'edit': "✏️ Редактировать",
         'profile': "👤 Профиль",
         'add_name': "✏️ Введите название привычки:",
-        'ask_time': "⏱ Введите целевое время в минутах (или 0, если не важно):",
         'choose_days': "📅 Выберите дни выполнения (можно несколько):",
         'ask_reminder': "⏰ Введите время напоминания (ЧЧ:ММ) или 'нет':",
         'habit_added': "✅ Привычка '{}' добавлена!",
         'no_habits_today': "На сегодня нет запланированных привычек.",
         'today_header': "📋 Привычки на {}:",
         'already_done': "Уже отмечено!",
-        'motivation': "Отлично! +10 XP 🔥",
         'no_habits': "У вас пока нет привычек. Добавьте через меню.",
         'choose_to_delete': "🗑 Выберите привычку для удаления:",
         'deleted': "✅ Привычка удалена.",
@@ -64,9 +62,14 @@ TEXTS = {
         'streak7_achievement': "7 дней подряд! 🔥",
         'streak30_achievement': "30 дней подряд! ⭐",
         'perfect_month_achievement': "Идеальный месяц! 🌟",
+        'ask_time_after': "Добавить время выполнения?",
+        'add_time': "⏱ Добавить время",
+        'skip_time': "✅ Пропустить",
+        'enter_time': "Введите время в минутах (только число):",
+        'time_saved': "✅ Время {} минут добавлено!",
     },
     'en': {
-        'welcome': "👋 Hi! I'm a habit tracker with levels and XP. Choose language /choose_language",
+        'welcome': "👋 Hi! I'm a habit tracker. Choose language /choose_language",
         'today': "📋 Today",
         'stats': "📊 Stats",
         'add': "➕ Add habit",
@@ -78,14 +81,12 @@ TEXTS = {
         'edit': "✏️ Edit",
         'profile': "👤 Profile",
         'add_name': "✏️ Enter habit name:",
-        'ask_time': "⏱ Enter target time in minutes (or 0 if not important):",
         'choose_days': "📅 Select days (multiple allowed):",
         'ask_reminder': "⏰ Enter reminder time (HH:MM) or 'no':",
         'habit_added': "✅ Habit '{}' added!",
         'no_habits_today': "No habits scheduled for today.",
         'today_header': "📋 Habits for {}:",
         'already_done': "Already marked!",
-        'motivation': "Great! +10 XP 🔥",
         'no_habits': "You have no habits yet. Add via menu.",
         'choose_to_delete': "🗑 Choose habit to delete:",
         'deleted': "✅ Habit deleted.",
@@ -110,6 +111,11 @@ TEXTS = {
         'streak7_achievement': "7 days in a row! 🔥",
         'streak30_achievement': "30 days in a row! ⭐",
         'perfect_month_achievement': "Perfect month! 🌟",
+        'ask_time_after': "Add time spent?",
+        'add_time': "⏱ Add time",
+        'skip_time': "✅ Skip",
+        'enter_time': "Enter time in minutes (number only):",
+        'time_saved': "✅ Time {} minutes added!",
     }
 }
 
@@ -129,9 +135,8 @@ MOTIVATION_EN = [
 ]
 
 # Состояния диалогов
-(CHOOSING_HABIT_TYPE, TYPING_HABIT_NAME, TYPING_HABIT_TIME,
- CHOOSING_HABIT_DAYS, CHOOSING_REMINDER_TIME, CONFIRM_DELETE,
- EDIT_SELECT, EDIT_NAME, EDIT_DAYS, EDIT_REMINDER) = range(10)
+(TYPING_HABIT_NAME, CHOOSING_HABIT_DAYS, CHOOSING_REMINDER_TIME, CONFIRM_DELETE,
+ EDIT_SELECT, EDIT_NAME, EDIT_DAYS, EDIT_REMINDER) = range(8)
 
 # ========== БАЗА ДАННЫХ ==========
 def init_db():
@@ -151,7 +156,6 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
         name TEXT,
-        target_time INTEGER DEFAULT 0,
         days TEXT DEFAULT '0123456',
         reminder_time TEXT,
         is_active INTEGER DEFAULT 1,
@@ -204,7 +208,6 @@ def get_text(user_id, key):
     return TEXTS[lang].get(key, TEXTS['ru'][key])
 
 def add_xp(user_id, amount):
-    """Добавляет опыт, повышает уровень, возвращает (new_xp, new_level, level_up_flag)"""
     row = db_query("SELECT xp, level FROM users WHERE id = ?", (user_id,), fetch_one=True)
     if not row:
         return
@@ -212,7 +215,6 @@ def add_xp(user_id, amount):
     xp += amount
     new_level = level
     level_up = False
-    # Формула: следующий уровень требует level*100 XP
     while xp >= new_level * 100:
         xp -= new_level * 100
         new_level += 1
@@ -221,7 +223,7 @@ def add_xp(user_id, amount):
     return xp, new_level, level_up
 
 def get_streak(user_id, habit_id):
-    logs = db_query("SELECT completed_date FROM habit_logs WHERE habit_id = ? ORDER BY completed_date DESC", (habit_id,), fetch_all=True)
+    logs = db_query("SELECT completed_date FROM habit_logs WHERE habit_id = ? AND minutes >= 0 ORDER BY completed_date DESC", (habit_id,), fetch_all=True)
     if not logs:
         return 0
     habit_days = db_query("SELECT days FROM habits WHERE id = ? AND user_id = ?", (habit_id, user_id), fetch_one=True)
@@ -255,26 +257,22 @@ def get_percentage(user_id, habit_id, days=30):
     if not required:
         return 100
     placeholders = ','.join(['?']*len(required))
-    completed = db_query(f"SELECT COUNT(DISTINCT completed_date) FROM habit_logs WHERE habit_id = ? AND completed_date IN ({placeholders})", (habit_id, *required), fetch_one=True)
+    completed = db_query(f"SELECT COUNT(DISTINCT completed_date) FROM habit_logs WHERE habit_id = ? AND completed_date IN ({placeholders}) AND minutes >= 0", (habit_id, *required), fetch_one=True)
     return (completed[0] / len(required)) * 100
 
 def check_achievements(user_id, habit_id):
-    """Проверяет и выдает ачивки, возвращает список названий (на русском для сообщения)"""
     streak = get_streak(user_id, habit_id)
     percent = get_percentage(user_id, habit_id, 30)
     lang = get_user_lang(user_id)
     earned = []
-    # Достижение 7 дней
     if streak >= 7:
         if not db_query("SELECT 1 FROM achievements WHERE user_id=? AND type='streak7'", (user_id,), fetch_one=True):
             db_query("INSERT INTO achievements(user_id, type, achieved_at) VALUES(?,?,?)", (user_id, 'streak7', datetime.now(TIMEZONE).isoformat()))
             earned.append(TEXTS[lang].get('streak7_achievement', "7 days streak! 🔥"))
-    # 30 дней
     if streak >= 30:
         if not db_query("SELECT 1 FROM achievements WHERE user_id=? AND type='streak30'", (user_id,), fetch_one=True):
             db_query("INSERT INTO achievements(user_id, type, achieved_at) VALUES(?,?,?)", (user_id, 'streak30', datetime.now(TIMEZONE).isoformat()))
             earned.append(TEXTS[lang].get('streak30_achievement', "30 days streak! ⭐"))
-    # Идеальный месяц (100% за 30 дней)
     if percent >= 99.9:
         if not db_query("SELECT 1 FROM achievements WHERE user_id=? AND type='perfect_month'", (user_id,), fetch_one=True):
             db_query("INSERT INTO achievements(user_id, type, achieved_at) VALUES(?,?,?)", (user_id, 'perfect_month', datetime.now(TIMEZONE).isoformat()))
@@ -282,7 +280,6 @@ def check_achievements(user_id, habit_id):
     return earned
 
 def get_month_calendar(user_id, year, month):
-    """Возвращает текст календаря с символами выполнения"""
     first_day = datetime(year, month, 1, tzinfo=TIMEZONE)
     last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
     start_weekday = first_day.weekday()
@@ -295,7 +292,7 @@ def get_month_calendar(user_id, year, month):
             mark = '⬜'
         else:
             total = len(habits)
-            done = db_query("SELECT COUNT(DISTINCT habit_id) FROM habit_logs WHERE habit_id IN ({}) AND completed_date=?".format(','.join(['?']*total)), [h[0] for h in habits] + [date_str], fetch_one=True)[0]
+            done = db_query("SELECT COUNT(DISTINCT habit_id) FROM habit_logs WHERE habit_id IN ({}) AND completed_date=? AND minutes>=0".format(','.join(['?']*total)), [h[0] for h in habits] + [date_str], fetch_one=True)[0]
             if total == 0:
                 mark = '⬜'
             else:
@@ -315,7 +312,6 @@ def get_month_calendar(user_id, year, month):
     return '\n'.join(weeks)
 
 def can_skip(user_id):
-    """Проверяет, можно ли использовать пропуск (не чаще раза в 7 дней)"""
     current_week = datetime.now(TIMEZONE).isocalendar()[1]
     used = db_query("SELECT 1 FROM skip_usage WHERE user_id=? AND used_week=?", (user_id, current_week), fetch_one=True)
     return used is None
@@ -362,7 +358,6 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     xp, level = row
     next_xp = level * 100 - xp
     text = f"👤 *Ваш профиль*\nУровень: {level}\nОпыт: {xp} / {level*100}\nДо следующего уровня: {next_xp} XP\n"
-    # Достижения
     achievements = db_query("SELECT type FROM achievements WHERE user_id=?", (user_id,), fetch_all=True)
     if achievements:
         text += "\n🏆 *Достижения:*\n"
@@ -380,51 +375,16 @@ async def skip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not can_skip(user_id):
         await update.message.reply_text(get_text(user_id, 'skip_used'))
         return
-    # Пропуск действует на все привычки сегодня: не сбрасывает серию, но и не отмечает.
-    # Механизм: мы ничего не записываем в habit_logs, но помечаем, что пропуск использован.
-    # Серия не сбросится, потому что get_streak смотрит только на дни, которые были выполнены.
-    # Однако для корректного поведения нужно, чтобы привычка не считалась выполненной, но и не считалась пропущенной.
-    # Наша функция get_streak уже корректна: если нет записи в habit_logs, день считается пропущенным и серия обрывается.
-    # Чтобы серия не обрывалась, мы должны добавить фиктивную запись? Нет, это будет считаться выполнением.
-    # Лучше реализовать отдельную таблицу skipped_days, но для простоты изменим get_streak так, чтобы он игнорировал дни с пропуском.
-    # Однако проще: при пропуске мы добавляем запись в habit_logs с minutes=-1, означающую пропуск. get_streak будет её игнорировать.
-    # Сделаем так:
     today_str = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
     habits = db_query("SELECT id FROM habits WHERE user_id=? AND is_active=1", (user_id,), fetch_all=True)
     for (hid,) in habits:
-        # Проверяем, нет ли уже отметки
         existing = db_query("SELECT id FROM habit_logs WHERE habit_id=? AND completed_date=?", (hid, today_str), fetch_one=True)
         if not existing:
             db_query("INSERT INTO habit_logs (habit_id, completed_date, minutes) VALUES (?,?,?)", (hid, today_str, -1))
     mark_skip_used(user_id)
     await update.message.reply_text(get_text(user_id, 'skip_ok'))
 
-# Модифицируем get_streak, чтобы игнорировать записи с minutes = -1
-def get_streak_fixed(user_id, habit_id):
-    logs = db_query("SELECT completed_date FROM habit_logs WHERE habit_id = ? AND minutes >= 0 ORDER BY completed_date DESC", (habit_id,), fetch_all=True)
-    if not logs:
-        return 0
-    habit_days = db_query("SELECT days FROM habits WHERE id = ? AND user_id = ?", (habit_id, user_id), fetch_one=True)
-    if not habit_days:
-        return 0
-    allowed_days = set(map(int, habit_days[0]))
-    today = datetime.now(TIMEZONE).date()
-    streak = 0
-    current_date = today
-    log_dates = {log[0] for log in logs}
-    while True:
-        if current_date.weekday() in allowed_days:
-            if current_date.strftime("%Y-%m-%d") in log_dates:
-                streak += 1
-            else:
-                break
-        current_date -= timedelta(days=1)
-    return streak
-
-# Переопределим get_streak на исправленную версию
-get_streak = get_streak_fixed
-
-# ---------- ДОБАВЛЕНИЕ ПРИВЫЧКИ ----------
+# ---------- ДОБАВЛЕНИЕ ПРИВЫЧКИ (без вопроса о времени) ----------
 async def add_habit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await update.message.reply_text(get_text(user_id, 'add_name'))
@@ -433,21 +393,10 @@ async def add_habit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def add_habit_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['habit_name'] = update.message.text
     user_id = update.effective_user.id
-    await update.message.reply_text(get_text(user_id, 'ask_time'))
-    return TYPING_HABIT_TIME
-
-async def add_habit_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        target = int(update.message.text)
-        context.user_data['habit_target'] = target
-        user_id = update.effective_user.id
-        keyboard = [[InlineKeyboardButton(day, callback_data=f"day_{i}") for i, day in enumerate(["Пн","Вт","Ср","Чт","Пт","Сб","Вс"])],
-                    [InlineKeyboardButton("✅ Готово", callback_data="days_done")]]
-        await update.message.reply_text(get_text(user_id, 'choose_days'), reply_markup=InlineKeyboardMarkup(keyboard))
-        return CHOOSING_HABIT_DAYS
-    except ValueError:
-        await update.message.reply_text("Введите число (минуты):")
-        return TYPING_HABIT_TIME
+    keyboard = [[InlineKeyboardButton(day, callback_data=f"day_{i}") for i, day in enumerate(["Пн","Вт","Ср","Чт","Пт","Сб","Вс"])],
+                [InlineKeyboardButton("✅ Готово", callback_data="days_done")]]
+    await update.message.reply_text(get_text(user_id, 'choose_days'), reply_markup=InlineKeyboardMarkup(keyboard))
+    return CHOOSING_HABIT_DAYS
 
 async def days_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -485,10 +434,9 @@ async def add_habit_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return CHOOSING_REMINDER_TIME
     user_id = update.effective_user.id
     habit_name = context.user_data['habit_name']
-    target_time = context.user_data['habit_target']
     days_str = context.user_data['habit_days_str']
-    db_query("INSERT INTO habits (user_id, name, target_time, days, reminder_time) VALUES (?,?,?,?,?)",
-             (user_id, habit_name, target_time, days_str, reminder))
+    db_query("INSERT INTO habits (user_id, name, days, reminder_time) VALUES (?,?,?,?)",
+             (user_id, habit_name, days_str, reminder))
     if reminder:
         habit_id = db_query("SELECT last_insert_rowid()", fetch_one=True)[0]
         hour, minute = map(int, reminder.split(':'))
@@ -515,12 +463,10 @@ async def snooze_habit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     habit_id = int(query.data.split('_')[1])
-    # Получаем данные о привычке
     row = db_query("SELECT user_id, name, reminder_time, days FROM habits WHERE id=?", (habit_id,), fetch_one=True)
     if not row:
         return
     user_id, name, reminder_time, days_str = row
-    # Устанавливаем новое напоминание через 30 минут
     new_time = datetime.now(TIMEZONE) + timedelta(minutes=30)
     context.application.job_queue.run_once(
         send_reminder_once, when=new_time,
@@ -533,7 +479,7 @@ async def send_reminder_once(context: ContextTypes.DEFAULT_TYPE):
     data = context.job.context
     await context.bot.send_message(data["user_id"], f"🔔 Напоминание: пора выполнить '{data['habit_name']}'!")
 
-# ---------- ОТМЕТКА СЕГОДНЯ И КАЛЕНДАРЬ ----------
+# ---------- ОТМЕТКА ВЫПОЛНЕНИЯ С ЗАПРОСОМ ВРЕМЕНИ ----------
 async def show_today(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     today_str = datetime.now(TIMEZONE).strftime("%Y-%m-%d")
@@ -558,22 +504,18 @@ async def complete_habit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, hid, date_str = query.data.split('_')
     habit_id = int(hid)
     user_id = query.from_user.id
-    # Проверяем, нет ли уже отметки (и не пропуск)
     existing = db_query("SELECT id, minutes FROM habit_logs WHERE habit_id=? AND completed_date=?", (habit_id, date_str), fetch_one=True)
     if existing and existing[1] >= 0:
         await query.edit_message_text(get_text(user_id, 'already_done'))
         return
-    # Удаляем запись о пропуске, если была
     if existing and existing[1] == -1:
         db_query("DELETE FROM habit_logs WHERE id=?", (existing[0],))
-    # Добавляем выполнение
+    # Вставляем запись с minutes = 0 (пока без времени)
     db_query("INSERT INTO habit_logs (habit_id, completed_date, minutes) VALUES (?,?,0)", (habit_id, date_str))
-    # Начисляем XP
+    # Начисляем XP за выполнение
     xp_gain = 10
     new_xp, new_level, level_up = add_xp(user_id, xp_gain)
-    # Мотивационная фраза
-    lang = get_user_lang(user_id)
-    mot = random.choice(MOTIVATION_RU if lang=='ru' else MOTIVATION_EN)
+    mot = random.choice(MOTIVATION_RU if get_user_lang(user_id)=='ru' else MOTIVATION_EN)
     reply = f"{mot}\n+{xp_gain} XP"
     if level_up:
         reply += "\n" + get_text(user_id, 'level_up').format(new_level)
@@ -581,10 +523,54 @@ async def complete_habit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     earned_ach = check_achievements(user_id, habit_id)
     for ach in earned_ach:
         reply += f"\n{get_text(user_id, 'achievement_unlock').format(ach)}"
-    await query.edit_message_text(reply)
-    # Обновляем список сегодня
+    # Сохраняем в context.user_data, чтобы потом добавить время
+    context.user_data['pending_habit_id'] = habit_id
+    context.user_data['pending_date'] = date_str
+    # Предлагаем добавить время
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(get_text(user_id, 'add_time'), callback_data="add_time_prompt")],
+        [InlineKeyboardButton(get_text(user_id, 'skip_time'), callback_data="skip_time")]
+    ])
+    await query.edit_message_text(reply + "\n\n" + get_text(user_id, 'ask_time_after'), reply_markup=keyboard)
+
+async def add_time_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    await query.edit_message_text(get_text(user_id, 'enter_time'))
+    context.user_data['awaiting_time'] = True
+
+async def skip_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    await query.edit_message_text("✅ Время не добавлено.")
+    # Очищаем pending
+    context.user_data.pop('pending_habit_id', None)
+    context.user_data.pop('pending_date', None)
     await show_today(update, context)
 
+async def save_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.user_data.get('awaiting_time'):
+        return
+    try:
+        minutes = int(update.message.text)
+        habit_id = context.user_data.get('pending_habit_id')
+        date_str = context.user_data.get('pending_date')
+        if habit_id is None or date_str is None:
+            await update.message.reply_text("Ошибка: не найдена привычка. Попробуйте отметить заново.")
+            context.user_data.pop('awaiting_time', None)
+            return
+        db_query("UPDATE habit_logs SET minutes = ? WHERE habit_id = ? AND completed_date = ?", (minutes, habit_id, date_str))
+        await update.message.reply_text(get_text(update.effective_user.id, 'time_saved').format(minutes))
+        context.user_data.pop('awaiting_time', None)
+        context.user_data.pop('pending_habit_id', None)
+        context.user_data.pop('pending_date', None)
+        await show_today(update, context)
+    except ValueError:
+        await update.message.reply_text("Введите число (минуты).")
+
+# ---------- КАЛЕНДАРЬ ----------
 async def calendar_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     today = datetime.now(TIMEZONE)
@@ -716,7 +702,7 @@ async def edit_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🔙 Назад", callback_data="edit_cancel")]
     ])
     await query.edit_message_text(get_text(user_id, 'what_to_edit'), reply_markup=keyboard)
-    return EDIT_SELECT  # остаёмся в том же состоянии
+    return EDIT_SELECT
 
 async def edit_name_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -735,19 +721,13 @@ async def edit_days_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
-    # Получаем текущие дни
     habit_id = context.user_data['edit_id']
     row = db_query("SELECT days FROM habits WHERE id=?", (habit_id,), fetch_one=True)
     current_days = set(map(int, row[0])) if row else set()
     context.user_data['edit_days_temp'] = current_days
-    keyboard = []
     days_names = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
-    row_btns = []
-    for i, name in enumerate(days_names):
-        emoji = "✅ " if i in current_days else "⬜ "
-        row_btns.append(InlineKeyboardButton(f"{emoji}{name}", callback_data=f"editday_{i}"))
-    keyboard.append(row_btns)
-    keyboard.append([InlineKeyboardButton("✅ Сохранить", callback_data="editdays_save")])
+    row_btns = [InlineKeyboardButton(f"{'✅ ' if i in current_days else '⬜ '}{days_names[i]}", callback_data=f"editday_{i}") for i in range(7)]
+    keyboard = [row_btns, [InlineKeyboardButton("✅ Сохранить", callback_data="editdays_save")]]
     await query.edit_message_text(get_text(user_id, 'edit_days_prompt'), reply_markup=InlineKeyboardMarkup(keyboard))
     return EDIT_DAYS
 
@@ -761,7 +741,6 @@ async def edit_days_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         context.user_data['edit_days_temp'].remove(day)
     else:
         context.user_data['edit_days_temp'].add(day)
-    # обновляем клавиатуру
     days_names = ["Пн","Вт","Ср","Чт","Пт","Сб","Вс"]
     row = [InlineKeyboardButton(f"{'✅ ' if i in context.user_data['edit_days_temp'] else '⬜ '}{days_names[i]}", callback_data=f"editday_{i}") for i in range(7)]
     keyboard = [row, [InlineKeyboardButton("✅ Сохранить", callback_data="editdays_save")]]
@@ -799,9 +778,6 @@ async def edit_reminder_save(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return EDIT_REMINDER
     habit_id = context.user_data['edit_id']
     db_query("UPDATE habits SET reminder_time=? WHERE id=?", (reminder, habit_id))
-    # Обновляем JobQueue: удаляем старую и создаём новую
-    # (упрощённо: можно перезапустить бота, но для правильной работы нужно удалить старый job)
-    # Здесь для простоты оставим, пользователь перезапустит бота или следующее напоминание сработает по новому расписанию после перезапуска.
     await update.message.reply_text(get_text(user_id, 'edit_reminder_saved'))
     return ConversationHandler.END
 
@@ -811,14 +787,14 @@ async def edit_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("Редактирование отменено.")
     return ConversationHandler.END
 
-# ---------- ТАБЛИЦА ЛИДЕРОВ (по уровню + XP) ----------
+# ---------- ТАБЛИЦА ЛИДЕРОВ ----------
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     users = db_query("SELECT id, first_name, username, level, xp FROM users", fetch_all=True)
     data = []
     for uid, fname, uname, level, xp in users:
         name = fname or uname or f"User_{uid}"
         data.append((name, level, xp))
-    data.sort(key=lambda x: (-x[1], -x[2]))  # по уровню, потом по XP
+    data.sort(key=lambda x: (-x[1], -x[2]))
     text = "🏆 *Таблица лидеров (уровень/опыт)*\n\n"
     for i, (name, level, xp) in enumerate(data[:10], 1):
         medal = "🥇 " if i==1 else "🥈 " if i==2 else "🥉 " if i==3 else ""
@@ -867,6 +843,9 @@ async def weekly_report(context: ContextTypes.DEFAULT_TYPE):
 # ---------- ОБРАБОТЧИК ТЕКСТА И КНОПОК ----------
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
+    if context.user_data.get('awaiting_time'):
+        await save_time(update, context)
+        return
     text = update.message.text
     t = get_text(user_id, 'today')
     s = get_text(user_id, 'stats')
@@ -932,6 +911,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await edit_days_save(update, context)
     elif data.startswith("snooze_"):
         await snooze_habit(update, context)
+    elif data == "add_time_prompt":
+        await add_time_prompt(update, context)
+    elif data == "skip_time":
+        await skip_time(update, context)
     else:
         await query.answer()
 
@@ -940,26 +923,22 @@ def main():
     init_db()
     app = Application.builder().token(TOKEN).build()
 
-    # ConversationHandler для добавления
     add_conv = ConversationHandler(
         entry_points=[CommandHandler("add", add_habit_start), MessageHandler(filters.Regex("➕ Добавить привычку"), add_habit_start)],
         states={
             TYPING_HABIT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_habit_name)],
-            TYPING_HABIT_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_habit_time)],
             CHOOSING_HABIT_DAYS: [CallbackQueryHandler(days_callback, pattern="^day_|days_done$")],
             CHOOSING_REMINDER_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_habit_reminder)],
         },
         fallbacks=[CommandHandler("cancel", lambda u,c: ConversationHandler.END)],
         allow_reentry=True
     )
-    # Удаление
     del_conv = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("🗑 Удалить привычку"), delete_habit_start)],
         states={CONFIRM_DELETE: [CallbackQueryHandler(confirm_delete, pattern="^del_|cancel_del$")]},
         fallbacks=[CommandHandler("cancel", lambda u,c: ConversationHandler.END)],
         allow_reentry=True
     )
-    # Редактирование
     edit_conv = ConversationHandler(
         entry_points=[CommandHandler("edit", edit_habit_start), MessageHandler(filters.Regex("✏️ Редактировать"), edit_habit_start)],
         states={
@@ -983,10 +962,9 @@ def main():
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-    # Еженедельный отчёт каждое воскресенье в 10:00
     app.job_queue.run_daily(weekly_report, time=time(10,0, tzinfo=TIMEZONE), days=(6,))
 
-    print("Бот запущен")
+    print("✅ Бот запущен")
     app.run_polling()
 
 if __name__ == "__main__":
