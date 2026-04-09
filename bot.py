@@ -11,9 +11,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 
 # ========== НАСТРОЙКИ ==========
-TOKEN = os.environ.get("8717114083:AAEgNViVX7h0ea6pHc4Awp76h0gF0eJbcQg", "")
+TOKEN = os.environ.get("BOT_TOKEN", "")
 if not TOKEN:
-    raise ValueError("8717114083:AAEgNViVX7h0ea6pHc4Awp76h0gF0eJbcQg")
+    raise ValueError("BOT_TOKEN not set")
 DB_NAME = "habits.db"
 TIMEZONE = ZoneInfo("Europe/Moscow")  # измените под свой часовой пояс
 
