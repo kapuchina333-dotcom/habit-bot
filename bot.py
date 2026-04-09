@@ -510,23 +510,18 @@ async def complete_habit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if existing and existing[1] == -1:
         db_query("DELETE FROM habit_logs WHERE id=?", (existing[0],))
-    # Вставляем запись с minutes = 0 (пока без времени)
     db_query("INSERT INTO habit_logs (habit_id, completed_date, minutes) VALUES (?,?,0)", (habit_id, date_str))
-    # Начисляем XP за выполнение
     xp_gain = 10
     new_xp, new_level, level_up = add_xp(user_id, xp_gain)
     mot = random.choice(MOTIVATION_RU if get_user_lang(user_id)=='ru' else MOTIVATION_EN)
     reply = f"{mot}\n+{xp_gain} XP"
     if level_up:
         reply += "\n" + get_text(user_id, 'level_up').format(new_level)
-    # Проверка достижений
     earned_ach = check_achievements(user_id, habit_id)
     for ach in earned_ach:
         reply += f"\n{get_text(user_id, 'achievement_unlock').format(ach)}"
-    # Сохраняем в context.user_data, чтобы потом добавить время
     context.user_data['pending_habit_id'] = habit_id
     context.user_data['pending_date'] = date_str
-    # Предлагаем добавить время
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton(get_text(user_id, 'add_time'), callback_data="add_time_prompt")],
         [InlineKeyboardButton(get_text(user_id, 'skip_time'), callback_data="skip_time")]
@@ -545,7 +540,6 @@ async def skip_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     user_id = query.from_user.id
     await query.edit_message_text("✅ Время не добавлено.")
-    # Очищаем pending
     context.user_data.pop('pending_habit_id', None)
     context.user_data.pop('pending_date', None)
     await show_today(update, context)
