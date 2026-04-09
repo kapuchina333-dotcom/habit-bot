@@ -13,7 +13,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 # ========== НАСТРОЙКИ ==========
 TOKEN = os.environ.get("8717114083:AAEgNViVX7h0ea6pHc4Awp76h0gF0eJbcQg", "")
 if not TOKEN:
-    raise ValueError("8717114083:AAEgNViVX7h0ea6pHc4Awp76h0gF0eJbcQg environment variable not set")
+    raise ValueError("8717114083:AAEgNViVX7h0ea6pHc4Awp76h0gF0eJbcQg")
 DB_NAME = "habits.db"
 TIMEZONE = ZoneInfo("Europe/Moscow")  # измените под свой часовой пояс
 
